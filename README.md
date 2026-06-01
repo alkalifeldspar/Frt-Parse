@@ -10,6 +10,8 @@ Converts the RCMP [Firearms Reference Table](https://www.rcmp-grc.gc.ca/en/firea
 
 Runs the full pipeline in one command: parse → split → create DB → import → cleanup.
 
+> **Note:** Processing the full FRT PDF (108,284 pages) may take several hours and produces a database of several gigabytes. For development and testing, use `trim_pdf.py` to extract a smaller slice first.
+
 ```bash
 python runAll.py frt-0504.pdf --database FRT
 python runAll.py frt-0504.pdf --host myserver --database FRT --user root --password secret
@@ -36,6 +38,24 @@ python runAll.py frt-0504.pdf --host myserver --database FRT --user root --passw
 ---
 
 ## Scripts
+
+### `trim_pdf.py`
+
+Extracts the first N pages of the FRT PDF into a smaller file for testing.
+
+```bash
+python trim_pdf.py frt-0504.pdf            # → frt-0504_trim1000.pdf
+python trim_pdf.py frt-0504.pdf -n 500     # → frt-0504_trim500.pdf
+python trim_pdf.py frt-0504.pdf -n 500 -o test.pdf
+```
+
+| Argument | Description |
+|---|---|
+| `pdf` | Input PDF path |
+| `-n` / `--pages` | Number of pages to keep (default: `1000`) |
+| `-o` / `--output` | Output path (default: `<name>_trim<N>.pdf`) |
+
+---
 
 ### `install.py`
 
