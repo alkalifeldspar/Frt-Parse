@@ -180,7 +180,18 @@ end
 """
 
 _INDEXES = [
+    ("IX_dbo_frn_make",                    "dbo_frn",              "create index          IX_dbo_frn_make                    on dbo_frn (make)"),
+    ("IX_dbo_frn_manufacturer",            "dbo_frn",              "create index          IX_dbo_frn_manufacturer            on dbo_frn (manufacturer)"),
+    ("IX_dbo_frn_type",                    "dbo_frn",              "create index          IX_dbo_frn_type                    on dbo_frn (type)"),
+    ("IX_dbo_frn_action",                  "dbo_frn",              "create index          IX_dbo_frn_action                  on dbo_frn (action)"),
+    ("IX_dbo_frn_country",                 "dbo_frn",              "create index          IX_dbo_frn_country                 on dbo_frn (country)"),
+    ("IX_dbo_frn_legal_classification",    "dbo_frn",              "create index          IX_dbo_frn_legal_classification    on dbo_frn (legal_classification)"),
+    ("IX_dbo_frn_model",                   "dbo_frn",              "create index          IX_dbo_frn_model                   on dbo_frn (model)"),
     ("IX_dbo_frnSubEntry_frn",             "dbo_frnSubEntry",      "create index          IX_dbo_frnSubEntry_frn             on dbo_frnSubEntry (frn)"),
+    ("IX_dbo_frnSubEntry_sub_frn",         "dbo_frnSubEntry",      "create index          IX_dbo_frnSubEntry_sub_frn         on dbo_frnSubEntry (sub_frn)"),
+    ("IX_dbo_frnSubEntry_calibre",         "dbo_frnSubEntry",      "create index          IX_dbo_frnSubEntry_calibre         on dbo_frnSubEntry (calibre)"),
+    ("IX_dbo_frnSubEntry_barrel_length",   "dbo_frnSubEntry",      "create index          IX_dbo_frnSubEntry_barrel_length   on dbo_frnSubEntry (barrel_length)"),
+    ("IX_dbo_frnSubEntry_legal_class",     "dbo_frnSubEntry",      "create index          IX_dbo_frnSubEntry_legal_class     on dbo_frnSubEntry (legal_classification)"),
     ("IX_dbo_frnNote_frn",                 "dbo_frnNote",          "create index          IX_dbo_frnNote_frn                 on dbo_frnNote (frn)"),
     ("IX_dbo_frnNote_frn_key",             "dbo_frnNote",          "create index          IX_dbo_frnNote_frn_key             on dbo_frnNote (frn, note_key)"),
     ("IX_dbo_frnCrossReference_frn",       "dbo_frnCrossReference","create index          IX_dbo_frnCrossReference_frn       on dbo_frnCrossReference (frn)"),

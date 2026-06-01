@@ -581,95 +581,100 @@ class FRTParser:
             import traceback
             traceback.print_exc()
 
+    # Single-token classification values.
+    _SINGLE_CLASSIFICATIONS = frozenset({'Restricted', 'Prohibited', 'Non-Restricted', 'Antique'})
+    # Tokens that mark the start of the Level / Legal Authority text after a CC classification.
+    _CLASSIFICATION_STOP = frozenset({'para.', 'Non-Commercial', 'Manufacturer'})
+
     @staticmethod
     def _parse_calibre_table_from_text(text: str) -> list:
         """Parse the "Calibre, Shots and Barrel Length" table into sub-entry dicts.
 
-        Each data row matches "FRN - N  CALIBRE  SHOTS  BARREL_MM  CLASSIFICATION ...".
-        Calibre names often start with a digit (e.g. "308 WIN", "7.62 NATO"), so
-        the parser uses a lookahead rule: consume a digit token as part of the
-        calibre only when the *next* token is non-numeric; stop at the first
-        digit-then-digit boundary, which marks the shots/barrel pair.
+        Column order: calibre  shots  barrel_mm  classification  [legal authority  level]
+
+        Shots and barrel are always bare integers.  Calibre may be empty, a bare
+        integer ("38", "44"), or a number+word combo ("308 WIN", "44 COLT").
+        Classification may be a single word ("Restricted", "Antique") or a multi-token
+        CC reference ('CC 2 "firearm"', 'CC 84(3) Exempted').
+
+        The parser locates shots and barrel by finding the rightmost pair of adjacent
+        digit-only tokens, which is independent of calibre format and classification
+        text.  Everything to the left of that pair is calibre; everything to the
+        right is the classification.
 
         Returns a list of dicts with keys: frn, calibre, shots, barrel_length,
         legal_classification (all strings; absent when not parseable).
         """
         sub_entries = []
         lines = text.split('\n')
-        
+
         in_calibre_section = False
         for line in lines:
             line_stripped = line.strip()
-            
-            # Start of calibre section
+
             if 'Calibre' in line and 'Shots' in line and 'Barrel' in line:
                 in_calibre_section = True
                 continue
-            
-            # End of section (when we hit another major section)
+
             if in_calibre_section and any(keyword in line_stripped for keyword in ['Notes', 'Cross-References', 'Also Known', 'Year Dates', 'Importer']):
                 in_calibre_section = False
                 continue
-            
-            # Parse sub-entry rows (format: FRN Calibre Shots Barrel...)
+
             if in_calibre_section and line_stripped:
-                # Match lines like "166062 - 1 308 WIN 5 457 Prohibited..."
                 match = re.match(r'(\d+\s*-\s*\d+)\s+(.+)', line_stripped)
                 if match:
                     frn_str = match.group(1).replace(' ', '')
-                    data_str = match.group(2)
-                    
-                    # Parse the data fields
-                    # Typical format: CALIBRE SHOTS BARREL CLASSIFICATION ...
-                    parts = data_str.split()
-                    
-                    if len(parts) >= 3:
-                        sub_entry = {'frn': frn_str}
+                    parts = match.group(2).split()
 
-                        # Calibre can start with a number (e.g. "308 WIN", "7.62 NATO").
-                        # Rule: consume a digit-token as part of calibre only when the NEXT
-                        # token is non-numeric (e.g. "308" before "WIN").  Stop as soon as a
-                        # digit-token is followed by another digit-token — that boundary is
-                        # where calibre ends and shots/barrel begin.
-                        calibre_parts = []
-                        j = 0
-                        while j < len(parts):
-                            part = parts[j]
-                            next_part = parts[j + 1] if j + 1 < len(parts) else None
-                            if part.isdigit():
-                                if next_part and not next_part.isdigit():
-                                    # digit followed by text → part of calibre ("308 WIN")
-                                    calibre_parts.append(part)
-                                    j += 1
-                                else:
-                                    # digit followed by digit (or end) → shots boundary
+                    if len(parts) < 2:
+                        continue
+
+                    sub_entry = {'frn': frn_str}
+
+                    # Find the rightmost pair of adjacent digit-only tokens.
+                    # Those positions are shots and barrel_length; everything
+                    # before them is calibre; everything after is classification.
+                    digit_positions = [k for k, p in enumerate(parts) if p.isdigit()]
+                    shots_idx = barrel_idx = None
+                    for i in range(len(digit_positions) - 1, 0, -1):
+                        if digit_positions[i] == digit_positions[i - 1] + 1:
+                            shots_idx = digit_positions[i - 1]
+                            barrel_idx = digit_positions[i]
+                            break
+
+                    if shots_idx is None:
+                        continue  # malformed row — skip
+
+                    sub_entry['shots'] = parts[shots_idx]
+                    sub_entry['barrel_length'] = parts[barrel_idx]
+
+                    calibre_parts = parts[:shots_idx]
+                    if calibre_parts:
+                        sub_entry['calibre'] = ' '.join(calibre_parts)
+
+                    # Extract classification from tokens immediately after barrel.
+                    cls_start = barrel_idx + 1
+                    if cls_start < len(parts):
+                        cls_token = parts[cls_start]
+                        if cls_token in FRTParser._SINGLE_CLASSIFICATIONS:
+                            sub_entry['legal_classification'] = cls_token
+                        elif cls_token == 'CC':
+                            # Multi-token CC reference: collect tokens until a
+                            # Level/Authority stop word or the 6-token limit.
+                            cls_parts = []
+                            i = cls_start
+                            while i < len(parts) and len(cls_parts) < 6:
+                                if parts[i] in FRTParser._CLASSIFICATION_STOP:
                                     break
-                            else:
-                                calibre_parts.append(part)
-                                j += 1
+                                cls_parts.append(parts[i])
+                                i += 1
+                            sub_entry['legal_classification'] = ' '.join(cls_parts)
+                        else:
+                            sub_entry['legal_classification'] = cls_token
 
-                        if calibre_parts:
-                            sub_entry['calibre'] = ' '.join(calibre_parts)
+                    if sub_entry.get('calibre') or sub_entry.get('shots') or sub_entry.get('barrel_length'):
+                        sub_entries.append(sub_entry)
 
-                        # Next numeric value is shots
-                        if j < len(parts) and parts[j].isdigit():
-                            sub_entry['shots'] = parts[j]
-                            j += 1
-
-                        # Next numeric value is barrel length (mm)
-                        if j < len(parts) and parts[j].isdigit():
-                            sub_entry['barrel_length'] = parts[j]
-                            j += 1
-
-                        # First remaining token is the legal classification ("Prohibited",
-                        # "Restricted", "Non-Restricted"). Everything after is the level/authority,
-                        # which is not stored.
-                        if j < len(parts):
-                            sub_entry['legal_classification'] = parts[j]
-                        
-                        if sub_entry.get('calibre') or sub_entry.get('shots') or sub_entry.get('barrel_length'):
-                            sub_entries.append(sub_entry)
-        
         return sub_entries
     
 _worker_progress_q = None  # set in each worker by _init_worker via Pool initializer
