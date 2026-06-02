@@ -144,18 +144,18 @@ class FRTParser:
         
         # Define patterns for key fields (excluding calibre/shots/barrel - those come from table)
         patterns = {
-            'frn': r'Firearm Reference Number \(FRN\):\s*(\d+)',
-            'make': r'Make:\s*([^\n]+?)(?:\n|$)',
-            'model': r'Model:\s*([^\n]+?)(?:\n|$)',
-            'manufacturer': r'Manufacturer:\s*([^\n]+?)(?:\n|$)',
-            'level': r'Level:\s*([^\n]+?)(?:\n|$)',
-            'type': r'Type:\s*([^\n]+?)(?:\n|$)',
-            'action': r'Action:\s*([^\n]+?)(?:\n|$)',
-            'country': r'Country of Manufacturer:\s*([^\n]+?)(?:\n|$)',
-            'legal_classification': r'Legal Classification:\s*([^\n]+?)(?:\n|$)',
-            'serial_numbering': r'Serial Numbering:\s*([^\n]+?)(?:\n|$)',
-            'year_dates': r'Year Dates:\s*([^\n]+?)(?:\n|$)',
-            'importer': r'Importer:\s*([^\n]+?)(?:\n|$)',
+            'frn': r'^Firearm Reference Number \(FRN\):\s*(\d+)',
+            'make': r'^Make:\s*([^\n]+?)(?:\n|$)',
+            'model': r'^Model:\s*([^\n]+?)(?:\n|$)',
+            'manufacturer': r'^Manufacturer:\s*([^\n]+?)(?:\n|$)',
+            'level': r'^Level:\s*([^\n]+?)(?:\n|$)',
+            'type': r'^Type:\s*([^\n]+?)(?:\n|$)',
+            'action': r'^Action:\s*([^\n]+?)(?:\n|$)',
+            'country': r'^Country of Manufacturer:\s*([^\n]+?)(?:\n|$)',
+            'legal_classification': r'^Legal Classification:\s*([^\n]+?)(?:\n|$)',
+            'serial_numbering': r'^Serial Numbering:\s*([^\n]+?)(?:\n|$)',
+            'year_dates': r'^Year Dates:\s*([^\n]+?)(?:\n|$)',
+            'importer': r'^Importer:\s*([^\n]+?)(?:\n|$)',
         }
         
         for key, pattern in patterns.items():
