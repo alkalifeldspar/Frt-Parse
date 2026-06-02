@@ -8,6 +8,8 @@ PACKAGES = [
     "pdfplumber",              # parse_frt.py  — PDF text extraction
     "pypdf",                   # parse_frt.py  — FRN PDF page extraction
     "mysql-connector-python",  # createDb.py / importIntoDb.py — MySQL/MariaDB
+    "requests",                # download_frt.py — HTTP download
+    "beautifulsoup4",          # download_frt.py — HTML parsing
 ]
 
 def main():
