@@ -158,11 +158,33 @@ class FRTParser:
             'importer': r'^Importer:\s*([^\n]+?)(?:\n|$)',
         }
         
+        _embedded_label = re.compile(
+            r'\s+(?:Make|Model|Manufacturer|Level|Type|Action'
+            r'|Country of Manufacturer|Legal Classification'
+            r'|Serial Numbering|Year Dates|Importer)\s*:',
+            re.IGNORECASE,
+        )
+        _label_prefix = re.compile(
+            r'^(?:Make|Model|Manufacturer|Level|Type|Action'
+            r'|Country of Manufacturer|Legal Classification'
+            r'|Serial Numbering|Year Dates|Importer)\s*:',
+            re.IGNORECASE,
+        )
+
         for key, pattern in patterns.items():
             match = re.search(pattern, text, re.IGNORECASE | re.MULTILINE)
             if match:
                 value = match.group(1).strip() if match.lastindex else ''
-                
+
+                # PDF extraction sometimes merges two lines; truncate at the next field label
+                embedded = _embedded_label.search(value)
+                if embedded:
+                    value = value[:embedded.start()].strip()
+
+                # If the value IS another field's label, there was no value here at all
+                if _label_prefix.match(value):
+                    continue
+
                 # If value says "See Note", try to get data from notes section
                 if value and value.lower() == 'see note' and notes_section:
                     note_value = FRTParser._extract_from_notes(key, notes_section)

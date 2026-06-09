@@ -92,7 +92,11 @@ def import_pdfs(pages_dir: str, host: str, port: int, database: str, user: str, 
     print("connected")
 
     cursor = conn.cursor()
-    cursor.execute("SET GLOBAL max_allowed_packet = 268435456")  # 256 MB — base64 PDFs can be large
+    try:
+        cursor.execute("SET GLOBAL max_allowed_packet = 268435456")
+    except MySQLError:
+        print("Warning: could not SET GLOBAL max_allowed_packet (insufficient privilege). "
+              "If inserts fail, set it manually in my.cnf: max_allowed_packet=256M")
     rows = []
     total   = 0
     skipped = 0
@@ -102,22 +106,15 @@ def import_pdfs(pages_dir: str, host: str, port: int, database: str, user: str, 
         nonlocal total, skipped
         if not rows:
             return
-        cursor.executemany(_INSERT_PDF, rows)
-        inserted = cursor.rowcount  # rows actually inserted (skipped rows not counted)
-        conn.commit()
-        if inserted >= 0 and inserted < len(rows):
-            # Identify which FRNs were silently dropped by INSERT IGNORE
-            batch_frns = [r[0] for r in rows]
-            placeholders = ','.join(['%s'] * len(batch_frns))
-            cursor.execute(
-                f"select frn from dbo_frn where frn in ({placeholders})",
-                batch_frns,
-            )
-            found = {r[0] for r in cursor.fetchall()}
-            for frn in batch_frns:
-                if frn not in found:
+        for row in rows:
+            cursor.execute(_INSERT_PDF, row)
+            if cursor.rowcount == 0:
+                frn = row[0]
+                cursor.execute("select 1 from dbo_frn where frn = %s", (frn,))
+                if not cursor.fetchone():
                     sys.stdout.write(f"\n  [skip] FRN {frn} — not in dbo_frn, PDF skipped")
                     skipped += 1
+        conn.commit()
         total += len(rows)
         rows.clear()
 
