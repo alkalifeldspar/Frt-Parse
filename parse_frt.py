@@ -87,9 +87,11 @@ class FRTParser:
       - parse_parallel() — splits the PDF across N worker processes then
                            merges results in document order.
 
-    Both methods reopen the PDF file every BATCH_SIZE pages so that
-    pdfminer's internal resource manager (font caches, CMap tables) is torn
-    down and garbage-collected, keeping memory use bounded across 100k+ pages.
+    Both methods open the PDF once and call Page.close() after each page.
+    pdfplumber caches a page's parsed objects (chars, layout, textmaps) on the
+    Page and keeps them until the whole PDF is closed — roughly 3 MB per page
+    on this document — so closing each page as it is consumed is what keeps
+    memory flat across 100k+ pages.
     """
 
     def __init__(self, pdf_path: str, output_path: str = 'frt_data.json'):
@@ -337,9 +339,9 @@ class FRTParser:
     def parse(self):
         """Parse the PDF sequentially and write the JSON output file.
 
-        Pages are processed in batches of BATCH_SIZE.  The PDF is closed and
-        reopened between batches so pdfminer's font/CMap caches are freed,
-        keeping memory use flat regardless of total page count.
+        The PDF is opened once and each page is closed after it is consumed,
+        freeing that page's cached objects and keeping memory use flat
+        regardless of total page count.
         """
         print(f"Starting FRT PDF parsing...")
         print(f"Input: {self.pdf_path}")
@@ -347,72 +349,67 @@ class FRTParser:
         print(f"Start time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         print("=" * 80)
         
-        # Reopen the PDF every BATCH_SIZE pages so pdfminer's resource manager
-        # (font caches, CMap data, colour spaces) is torn down and GC'd.
-        BATCH_SIZE = 1000
-
         try:
-            import gc
+            with pdfplumber.open(self.pdf_path) as pdf, \
+                    open(self.output_path, 'w', encoding='utf-8') as output_file:
 
-            with pdfplumber.open(self.pdf_path) as _pdf:
-                total_pages = len(_pdf.pages)
+                total_pages = len(pdf.pages)
+                w = len(str(total_pages))  # digit width for alignment
+                start_time = time.monotonic()
 
-            w = len(str(total_pages))  # digit width for alignment
-            start_time = time.monotonic()
-
-            with open(self.output_path, 'w', encoding='utf-8') as output_file:
                 output_file.write('[\n')
 
-                for batch_start in range(0, total_pages, BATCH_SIZE):
-                    batch_end = min(batch_start + BATCH_SIZE, total_pages)
+                for page_idx in range(total_pages):
+                    page = pdf.pages[page_idx]
+                    try:
+                        text = page.extract_text()
+                        page_num = page_idx + 1
 
-                    with pdfplumber.open(self.pdf_path) as pdf:
-                        for page_idx in range(batch_start, batch_end):
-                            text = pdf.pages[page_idx].extract_text()
-                            page_num = page_idx + 1
+                        if text:
+                            frn = self.extract_frn(text)
 
-                            if text:
-                                frn = self.extract_frn(text)
+                            if frn and not self.is_sub_entry(frn):
+                                if frn != self.current_parent_frn:
+                                    if self.current_record and self.current_parent_frn:
+                                        self._write_record_with_subentries(output_file)
+                                    self.current_parent_frn = frn
+                                    self.current_record = {'frn': frn}
+                                    self.sub_entries = []
+                                    self.current_cross_refs = []
 
-                                if frn and not self.is_sub_entry(frn):
-                                    if frn != self.current_parent_frn:
-                                        if self.current_record and self.current_parent_frn:
-                                            self._write_record_with_subentries(output_file)
-                                        self.current_parent_frn = frn
-                                        self.current_record = {'frn': frn}
-                                        self.sub_entries = []
-                                        self.current_cross_refs = []
+                                fields = self.extract_field_value(text)
+                                self.current_record.update(fields)
 
-                                    fields = self.extract_field_value(text)
-                                    self.current_record.update(fields)
+                                if 'Notes' in text and 'notes' not in self.current_record:
+                                    notes_dict = self._parse_notes_section(text)
+                                    if notes_dict:
+                                        self.current_record['notes'] = notes_dict
 
-                                    if 'Notes' in text and 'notes' not in self.current_record:
-                                        notes_dict = self._parse_notes_section(text)
-                                        if notes_dict:
-                                            self.current_record['notes'] = notes_dict
+                                if 'Calibre' in text and 'Shots' in text and 'Barrel' in text and not self.sub_entries:
+                                    self.sub_entries.extend(self._parse_calibre_table_from_text(text))
 
-                                    if 'Calibre' in text and 'Shots' in text and 'Barrel' in text and not self.sub_entries:
-                                        self.sub_entries.extend(self._parse_calibre_table_from_text(text))
+                                if 'Cross-References' in text and not self.current_cross_refs:
+                                    self.current_cross_refs = self._extract_cross_references(text)
 
-                                    if 'Cross-References' in text and not self.current_cross_refs:
-                                        self.current_cross_refs = self._extract_cross_references(text)
+                        self.pages_processed += 1
 
-                            self.pages_processed += 1
-
-                            elapsed = time.monotonic() - start_time
-                            rate = self.pages_processed / elapsed if elapsed > 0 else 0
-                            eta = (total_pages - page_num) / rate if rate > 0 else 0
-                            sys.stdout.write(
-                                f"\r  {page_num:{w},}/{total_pages:,}"
-                                f"  ({100 * page_num / total_pages:5.1f}%)"
-                                f"  records: {self.records_processed:,}"
-                                f"  {rate:,.0f} pg/s"
-                                f"  ETA {_format_duration(eta)}  "
-                            )
-                            sys.stdout.flush()
-
-                    # PDF closed here — pdfminer caches freed
-                    gc.collect()
+                        elapsed = time.monotonic() - start_time
+                        rate = self.pages_processed / elapsed if elapsed > 0 else 0
+                        eta = (total_pages - page_num) / rate if rate > 0 else 0
+                        sys.stdout.write(
+                            f"\r  {page_num:{w},}/{total_pages:,}"
+                            f"  ({100 * page_num / total_pages:5.1f}%)"
+                            f"  records: {self.records_processed:,}"
+                            f"  {rate:,.0f} pg/s"
+                            f"  ETA {_format_duration(eta)}  "
+                        )
+                        sys.stdout.flush()
+                    finally:
+                        # pdfplumber caches every page's parsed objects on the
+                        # Page and holds them until the PDF is closed.  Release
+                        # this page's cache now so memory stays flat across
+                        # 100k+ pages.
+                        page.close()
 
                 if self.current_record and self.current_parent_frn:
                     self._write_record_with_subentries(output_file)
@@ -461,9 +458,9 @@ class FRTParser:
 
         Strategy (map-reduce):
           1. Split the PDF into num_workers equal page-range chunks.
-          2. Each worker opens its own PDF handle, processes its chunk in
-             sub-batches of 500 pages (to bound pdfminer memory per worker),
-             and returns a list of per-page result tuples.
+          2. Each worker opens its own PDF handle scoped to just its chunk
+             (pdfplumber's `pages=` argument), closes each page as it is
+             consumed, and returns a list of per-page result tuples.
           3. The main process sorts all results by page index (restoring document
              order), merges pages that share an FRN, and writes the output.
 
@@ -727,17 +724,18 @@ def _worker_extract_pages(args):
         cross_refs are lists (empty when not present on that page).
     """
     pdf_path, start_page, end_page, worker_id = args
-    import gc
 
-    BATCH_SIZE = 500  # smaller than sequential — N workers run concurrently
     results = []
     try:
-        for batch_start in range(start_page, end_page, BATCH_SIZE):
-            batch_end = min(batch_start + BATCH_SIZE, end_page)
-            with pdfplumber.open(pdf_path) as pdf:
-                total = len(pdf.pages)
-                for page_idx in range(batch_start, min(batch_end, total)):
-                    text = pdf.pages[page_idx].extract_text()
+        # `pages=` restricts pdfplumber to this worker's own range, so it builds
+        # Page objects for ~1/N of the document instead of all of it.  A range
+        # object (not a list) keeps pdfplumber's membership test O(1) per page.
+        # Page numbers are 1-based; end_page is exclusive.
+        page_range = range(start_page + 1, end_page + 1)
+        with pdfplumber.open(pdf_path, pages=page_range) as pdf:
+            for page in pdf.pages:
+                try:
+                    text = page.extract_text()
                     if not text:
                         continue
                     frn = FRTParser.extract_frn(text)
@@ -753,11 +751,16 @@ def _worker_extract_pages(args):
                     notes_dict = {}
                     if 'Notes' in text:
                         notes_dict = FRTParser._parse_notes_section(text)
-                    results.append((page_idx, frn, fields, sub_entries, cross_refs, notes_dict))
+                    results.append((page.page_number - 1, frn, fields,
+                                    sub_entries, cross_refs, notes_dict))
                     if _worker_progress_q is not None:
                         _worker_progress_q.put(1)
-            # PDF closed here — pdfminer caches freed
-            gc.collect()
+                finally:
+                    # pdfplumber caches every parsed object (chars, layout,
+                    # textmaps) on the Page and holds it until the PDF is
+                    # closed — ~3 MB per page on this document.  Release it now
+                    # or the worker grows by GBs as it walks its chunk.
+                    page.close()
     except Exception as e:
         import traceback
         print(f"Worker {worker_id} error (pages {start_page}-{end_page}): {e}", flush=True)
