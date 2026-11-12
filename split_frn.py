@@ -39,7 +39,7 @@ except ImportError:
 _FRN_SUB    = re.compile(r'Firearm Reference Number \(FRN\):\s*(\d+)\s*-\s*(\d+)')
 _FRN_PARENT = re.compile(r'Firearm Reference Number \(FRN\):\s*(\d+)')
 
-# Reopen pdfplumber every N pages so its per-page layout cache doesn't grow unbounded.
+# Reopen pdfplumber every N pages (pages are also closed individually in split()).
 _SCAN_BATCH = 5000
 
 
@@ -117,13 +117,21 @@ def split(pdf_path: str, pages_dir: str, top_chars: int = 400, num_writers: int 
         n_found += 1
         q.put((frn, sorted(indices)))   # blocks when queue is full (natural backpressure)
 
-    # Process in batches: exiting the `with` block releases pdfplumber's per-page
-    # layout cache so memory stays bounded regardless of total page count.
+    # pdfplumber caches every page's parsed objects (~3 MB/page) until the PDF is
+    # closed, so each page is closed as soon as its text is read.  Without this a
+    # batch builds a multi-GB object graph and the interpreter can crash during
+    # garbage collection (Windows access violation, exit code 0xC0000005).
+    # `pages=` limits each open to the batch's own range (1-based, end exclusive)
+    # so pdfplumber doesn't build Page objects for the whole document every batch.
     for batch_start in range(0, total, _SCAN_BATCH):
         batch_end = min(batch_start + _SCAN_BATCH, total)
-        with pdfplumber.open(pdf_path) as pdf:
-            for i in range(batch_start, batch_end):
-                text = (pdf.pages[i].extract_text() or '')[:top_chars]
+        with pdfplumber.open(pdf_path, pages=range(batch_start + 1, batch_end + 1)) as pdf:
+            for page in pdf.pages:
+                i = page.page_number - 1
+                try:
+                    text = (page.extract_text() or '')[:top_chars]
+                finally:
+                    page.close()
                 frn  = _extract_frn(text)
 
                 if frn != current_frn:
