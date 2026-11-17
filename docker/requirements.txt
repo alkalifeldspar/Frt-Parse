@@ -1,0 +1,6 @@
+# Python packages for the FRT scripts inside the container (see ../install.py)
+pypdf==5.1.0
+pypdfium2==4.30.0
+mysql-connector-python==9.1.0
+requests==2.32.3
+beautifulsoup4==4.12.3

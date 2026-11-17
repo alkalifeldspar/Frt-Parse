@@ -65,7 +65,7 @@ Installs all required Python packages.
 python install.py
 ```
 
-Installs: `pdfplumber`, `pypdf`, `mysql-connector-python`.
+Installs: `pypdf`, `pypdfium2`, `mysql-connector-python`.
 
 ---
 
@@ -147,7 +147,16 @@ python createDb.py --host myserver --database FRT --user root --password secret
 | `dbo_frnCrossReference` | Cross-referenced FRNs |
 | `dbo_frnPdf` | Base64-encoded per-FRN PDFs |
 
-Each table has a `fullText` column populated automatically by before-insert/before-update triggers via the `fulltextify()` stored function. A `FULLTEXT` index on each `fullText` column enables full-text search.
+Each table has a `fullText` column built by the `fulltextify()` stored function, with a `FULLTEXT` index on it. `importIntoDb.py` recomputes `fullText` for every row and rebuilds the indexes after each import; before-insert/before-update triggers keep it current for rows changed later.
+
+`fulltextify()` normalises text as follows, and search terms must be normalised the same way:
+
+1. Punctuation `()[]{}.,;:/|!?@#$%^&*+=~` `` ` `` `"'<>` is removed.
+2. Every word containing a dash is stored twice: with each `-` replaced by `DSH`, and with the dashes removed (`ST-22` → `STDSH22` and `ST22`).
+3. A reversed copy of the whole text is appended, for suffix searches.
+4. Words of 1–2 letters or digits get a `__` prefix (`M1` → `__M1`), because InnoDB doesn't index words shorter than 3 characters.
+
+So to find `ST-22` and `ST22`, search for `ST22`. To rank exact-dash matches first, search `STDSH22 ST22` in boolean mode. For a suffix search, reverse the term before applying step 4.
 
 ---
 
@@ -217,8 +226,8 @@ Fields are omitted when absent or when the PDF value is "No Data". `notes` keys 
 ## Requirements
 
 ```
-pdfplumber
 pypdf
+pypdfium2
 mysql-connector-python
 ```
 
@@ -231,7 +240,7 @@ python install.py
 Or manually:
 
 ```bash
-pip install pdfplumber pypdf mysql-connector-python
+pip install pypdf pypdfium2 mysql-connector-python
 ```
 
 Python 3.10 or later is required (`str | None` union type syntax).

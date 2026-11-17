@@ -3,8 +3,9 @@
 importIntoDb.py — Import a parse_frt.py output file into the FRT database.
 
 Accepts both JSON array and JSONL formats. Records are inserted in batches for
-performance. The fullText column on each table is populated automatically by
-the database triggers (no need to supply it here).
+performance. The fullText triggers are skipped during the load; once every
+record is in, fullText is recomputed for all rows and the FULLTEXT indexes are
+rebuilt from scratch (createDb.rebuild_fulltext).
 
 Usage:
   python importIntoDb.py output.jsonl --database FRT
@@ -25,6 +26,9 @@ try:
 except ImportError:
     print("Error: mysql-connector-python is required.  Install with:  pip install mysql-connector-python")
     sys.exit(1)
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import createDb  # noqa: E402
 
 
 BATCH_SIZE = 100
@@ -182,6 +186,8 @@ def import_records(path, host, port, database, user, password):
     print("=" * 60)
 
     cursor = conn.cursor()
+    # fullText is filled for every row by rebuild_fulltext() once the load is done
+    cursor.execute(f"set {createDb._SKIP_VAR} = 1")
 
     frn_rows  = []
     sub_rows  = []
@@ -270,12 +276,13 @@ def import_records(path, host, port, database, user, password):
                 sys.stdout.flush()
 
         flush()
+        sys.stdout.write("\n")
+        createDb.rebuild_fulltext(conn, database)
 
     finally:
         conn.close()
 
     elapsed = time.monotonic() - start_time
-    sys.stdout.write("\n")
     print("=" * 60)
     print(f"Done in {_format_duration(elapsed)}")
     print(f"  dbo_frn               {total_frn:>8,} rows")

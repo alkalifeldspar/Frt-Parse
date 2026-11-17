@@ -17,6 +17,7 @@ Usage:
 
 import argparse
 import sys
+import time
 
 try:
     import mysql.connector
@@ -136,10 +137,12 @@ returns longtext charset utf8mb4
 deterministic
 begin
     declare cleaned longtext charset utf8mb4;
+    declare extras  longtext charset utf8mb4 default '';
+    declare tok     longtext charset utf8mb4;
+    declare n       int default 1;
 
-    -- replace dash with token, then strip common special chars
-    set cleaned = replace(input,    '-',  'DSH');
-    set cleaned = replace(cleaned,  '(',  '');
+    -- strip common special chars (dashes are handled below)
+    set cleaned = replace(input,    '(',  '');
     set cleaned = replace(cleaned,  ')',  '');
     set cleaned = replace(cleaned,  '[',  '');
     set cleaned = replace(cleaned,  ']',  '');
@@ -170,12 +173,31 @@ begin
     set cleaned = replace(cleaned,  '>',  '');
     set cleaned = trim(cleaned);
 
-    if char_length(cleaned) = 0 then
+    if cleaned is null or char_length(cleaned) = 0 then
         return '';
     end if;
 
-    -- return forward and reversed so both directions are searchable
-    return concat(cleaned, ' ', reverse(cleaned));
+    -- every dashed word is also indexed with its dashes removed, so ST-22 is
+    -- stored as both STDSH22 and ST22 (a search for ST22 then finds either form)
+    dashed: loop
+        set tok = regexp_substr(cleaned, '[^[:space:]]*-[^[:space:]]*', 1, n);
+        if tok is null then
+            leave dashed;
+        end if;
+        set tok = replace(tok, '-', '');
+        if char_length(tok) > 0 then
+            set extras = concat(extras, ' ', tok);
+        end if;
+        set n = n + 1;
+    end loop;
+
+    set cleaned = concat(replace(cleaned, '-', 'DSH'), extras);
+
+    -- forward and reversed so both directions are searchable
+    set cleaned = concat(cleaned, ' ', reverse(cleaned));
+
+    -- prefix 1-2 character words with __ so they reach innodb_ft_min_token_size (3)
+    return regexp_replace(cleaned, '(?<![[:alnum:]_])([[:alnum:]]{1,2})(?![[:alnum:]_])', '__$1');
 end
 """
 
@@ -203,117 +225,75 @@ _INDEXES = [
 ]
 
 
+# Expressions that feed each table's fullText column, with {r} as the row
+# prefix ("new." inside a trigger, empty in rebuild_fulltext()).
+_FULLTEXT_SOURCES = {
+    "dbo_frn": [
+        "{r}frn", "{r}make", "{r}model", "{r}manufacturer",
+        "{r}level", "{r}type", "{r}action", "{r}country",
+        "{r}legal_classification", "{r}year_dates", "{r}importer",
+    ],
+    "dbo_frnSubEntry": [
+        "{r}frn", "{r}sub_frn", "{r}calibre",
+        "{r}shots", "{r}barrel_length", "{r}legal_classification",
+    ],
+    "dbo_frnNote": [
+        "{r}note_value", "cast({r}bullet_index as char)",
+    ],
+    "dbo_frnCrossReference": [
+        "{r}ref_frn", "{r}description",
+    ],
+}
+
+# importIntoDb.py sets this session variable so the triggers skip rows it
+# inserts; it fills fullText for every row afterwards with rebuild_fulltext().
+_SKIP_VAR = "@frt_skip_fulltext"
+
+
+def _fulltext_expr(table: str, row: str = "") -> str:
+    cols = ", ".join(c.format(r=row) for c in _FULLTEXT_SOURCES[table])
+    return f"fulltextify(concat_ws(' ', {cols}))"
+
+
 _TRIGGERS = [
-    # ------------------------------------------------------------------ dbo_frn
     (
-        "trg_dbo_frn_bi",
-        """
-        create trigger trg_dbo_frn_bi
-        before insert on dbo_frn for each row
+        f"trg_{table}_{suffix}",
+        f"""
+        create trigger trg_{table}_{suffix}
+        before {event} on {table} for each row
         begin
-            set new.`fullText` = fulltextify(concat_ws(' ',
-                new.frn, new.make, new.model, new.manufacturer,
-                new.level, new.type, new.action, new.country,
-                new.legal_classification, new.year_dates, new.importer
-            ));
+            if {_SKIP_VAR} is null then
+                set new.`fullText` = {_fulltext_expr(table, "new.")};
+            end if;
         end
         """,
-    ),
-    (
-        "trg_dbo_frn_bu",
-        """
-        create trigger trg_dbo_frn_bu
-        before update on dbo_frn for each row
-        begin
-            set new.`fullText` = fulltextify(concat_ws(' ',
-                new.frn, new.make, new.model, new.manufacturer,
-                new.level, new.type, new.action, new.country,
-                new.legal_classification, new.year_dates, new.importer
-            ));
-        end
-        """,
-    ),
-
-    # --------------------------------------------------------- dbo_frnSubEntry
-    (
-        "trg_dbo_frnSubEntry_bi",
-        """
-        create trigger trg_dbo_frnSubEntry_bi
-        before insert on dbo_frnSubEntry for each row
-        begin
-            set new.`fullText` = fulltextify(concat_ws(' ',
-                new.frn, new.sub_frn, new.calibre,
-                new.shots, new.barrel_length, new.legal_classification
-            ));
-        end
-        """,
-    ),
-    (
-        "trg_dbo_frnSubEntry_bu",
-        """
-        create trigger trg_dbo_frnSubEntry_bu
-        before update on dbo_frnSubEntry for each row
-        begin
-            set new.`fullText` = fulltextify(concat_ws(' ',
-                new.frn, new.sub_frn, new.calibre,
-                new.shots, new.barrel_length, new.legal_classification
-            ));
-        end
-        """,
-    ),
-
-    # -------------------------------------------------------------- dbo_frnNote
-    (
-        "trg_dbo_frnNote_bi",
-        """
-        create trigger trg_dbo_frnNote_bi
-        before insert on dbo_frnNote for each row
-        begin
-            set new.`fullText` = fulltextify(concat_ws(' ',
-                new.note_value, cast(new.bullet_index as char)
-            ));
-        end
-        """,
-    ),
-    (
-        "trg_dbo_frnNote_bu",
-        """
-        create trigger trg_dbo_frnNote_bu
-        before update on dbo_frnNote for each row
-        begin
-            set new.`fullText` = fulltextify(concat_ws(' ',
-                new.note_value, cast(new.bullet_index as char)
-            ));
-        end
-        """,
-    ),
-
-    # ------------------------------------------------------- dbo_frnCrossReference
-    (
-        "trg_dbo_frnCrossReference_bi",
-        """
-        create trigger trg_dbo_frnCrossReference_bi
-        before insert on dbo_frnCrossReference for each row
-        begin
-            set new.`fullText` = fulltextify(concat_ws(' ',
-                new.ref_frn, new.description
-            ));
-        end
-        """,
-    ),
-    (
-        "trg_dbo_frnCrossReference_bu",
-        """
-        create trigger trg_dbo_frnCrossReference_bu
-        before update on dbo_frnCrossReference for each row
-        begin
-            set new.`fullText` = fulltextify(concat_ws(' ',
-                new.ref_frn, new.description
-            ));
-        end
-        """,
-    ),
+    )
+    for table in _FULLTEXT_SOURCES
+    for suffix, event in (("bi", "insert"), ("bu", "update"))
 ]
+
+
+def rebuild_fulltext(conn, database: str) -> None:
+    """Recompute fullText for every row, then rebuild each FULLTEXT index from scratch.
+
+    The index is dropped first so the update doesn't maintain it row by row. The
+    triggers are skipped for this session so each value is computed only once.
+    """
+    cursor = conn.cursor()
+    cursor.execute(f"set {_SKIP_VAR} = 1")
+    print("Rebuilding fulltext:")
+    for table in _FULLTEXT_SOURCES:
+        index = f"FTI_{table}_fullText"
+        print(f"  fulltext {table}:", end=" ", flush=True)
+        started = time.monotonic()
+        if _index_exists(cursor, database, index, table):
+            cursor.execute(f"alter table {table} drop index {index}")
+        cursor.execute(f"update {table} set `fullText` = {_fulltext_expr(table)}")
+        updated = cursor.rowcount
+        conn.commit()
+        cursor.execute(f"create fulltext index {index} on {table} (`fullText`)")
+        print(f"{updated:,} updated ({time.monotonic() - started:.1f}s)", flush=True)
+    cursor.execute(f"set {_SKIP_VAR} = null")
 
 
 def _index_exists(cursor, database: str, index_name: str, table_name: str) -> bool:

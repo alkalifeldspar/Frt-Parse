@@ -5,8 +5,8 @@ import subprocess
 import sys
 
 PACKAGES = [
-    "pdfplumber",              # parse_frt.py  — PDF text extraction
-    "pypdf",                   # parse_frt.py  — FRN PDF page extraction
+    "pypdf",                   # split_frn.py  — FRN PDF page extraction
+    "pypdfium2",               # parse_frt.py / split_frn.py — fast page text extraction
     "mysql-connector-python",  # createDb.py / importIntoDb.py — MySQL/MariaDB
     "requests",                # download_frt.py — HTTP download
     "beautifulsoup4",          # download_frt.py — HTML parsing

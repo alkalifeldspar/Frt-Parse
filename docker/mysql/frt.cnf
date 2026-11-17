@@ -1,0 +1,10 @@
+[mysqld]
+# The ingest bulk-loads several GB (base64 PDFs). Binary logs would double the
+# disk use and are not needed for a single, self-contained server.
+skip-log-bin
+# importIntoDb.py also raises this at runtime; set it at startup so it always applies.
+max_allowed_packet=256M
+innodb_buffer_pool_size=512M
+innodb_log_buffer_size=64M
+character-set-server=utf8mb4
+collation-server=utf8mb4_0900_ai_ci

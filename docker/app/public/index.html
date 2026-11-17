@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FRT Database Admin</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%230078d4' stroke-width='1.4'%3E%3Cellipse cx='8' cy='3.6' rx='5' ry='2'/%3E%3Cpath d='M3 3.6v8.8c0 1.1 2.2 2 5 2s5-.9 5-2V3.6M3 8c0 1.1 2.2 2 5 2s5-.9 5-2'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="titlebar">
+    <span class="titlebar-icon" data-icon="database"></span>
+    <span class="titlebar-title">FRT Database — Admin</span>
+  </header>
+
+  <div class="workbench">
+    <nav class="activitybar" aria-label="Views">
+      <button class="ab-item" data-view="ingest" title="Ingest" aria-label="Ingest"><span data-icon="download"></span></button>
+      <button class="ab-item" data-view="lookup" title="Look up" aria-label="Look up"><span data-icon="search"></span></button>
+    </nav>
+
+    <aside class="sidebar" aria-label="Database">
+      <div class="sidebar-title">Explorer: FRT Database</div>
+
+      <section class="pane" data-pane="live">
+        <button class="pane-header" aria-expanded="true">
+          <span class="pane-chevron" data-icon="chevronDown"></span>
+          <span class="pane-title">Live database</span>
+          <span class="pane-meta" id="live-name"></span>
+        </button>
+        <div class="pane-body" id="live"></div>
+      </section>
+
+      <section class="pane" data-pane="previous">
+        <button class="pane-header" aria-expanded="true">
+          <span class="pane-chevron" data-icon="chevronDown"></span>
+          <span class="pane-title">Previous version</span>
+          <span class="pane-meta" id="prev-name"></span>
+        </button>
+        <div class="pane-body" id="previous"></div>
+      </section>
+
+      <section class="pane" data-pane="history">
+        <button class="pane-header" aria-expanded="true">
+          <span class="pane-chevron" data-icon="chevronDown"></span>
+          <span class="pane-title">History</span>
+        </button>
+        <div class="pane-body" id="history"></div>
+      </section>
+    </aside>
+
+    <main class="editor-group">
+      <div class="tabs" id="tabs" role="tablist"></div>
+      <div class="breadcrumbs" id="breadcrumbs"></div>
+
+      <div class="editor" id="editor">
+        <!-- Ingest -->
+        <section class="view" id="view-ingest">
+          <div class="page">
+            <div class="page-head">
+              <h1>Ingest <span id="job-badge"></span></h1>
+              <p class="desc">
+                Downloads the latest Firearms Reference Table from rcmp.ca, parses it and loads it into a
+                staging database. The live database stays online throughout and is swapped over atomically
+                once the new data validates.
+              </p>
+            </div>
+
+            <div class="actions">
+              <button id="btn-ingest" class="btn btn-primary"><span data-icon="download"></span><span class="btn-label">Download &amp; Ingest Latest FRT</span></button>
+              <button id="btn-cancel" class="btn btn-secondary" hidden><span data-icon="stop"></span>Cancel</button>
+              <label class="checkbox"><input type="checkbox" id="chk-force"><span class="checkbox-box"><span data-icon="check"></span></span>Re-ingest even if already live</label>
+            </div>
+
+            <p class="hint" id="job-empty">No ingest has run since the server started.</p>
+
+            <div id="job" hidden>
+              <div class="overall">
+                <div class="overall-row">
+                  <span id="overall-label" class="overall-label">Starting…</span>
+                  <span class="mono dim" id="overall-meta"></span>
+                </div>
+                <div class="progress"><div class="progress-fill" id="overall-fill"></div></div>
+              </div>
+              <div id="job-alert" class="callout" hidden></div>
+              <div class="section-title">Stages</div>
+              <ol class="tree" id="stages"></ol>
+            </div>
+          </div>
+        </section>
+
+        <!-- Look up -->
+        <section class="view" id="view-lookup" hidden>
+          <div class="page">
+            <div class="page-head">
+              <h1>Look up</h1>
+              <p class="desc">Search the live database by FRN, or by the start of a make, model or manufacturer.</p>
+            </div>
+            <div class="search-box">
+              <span data-icon="search"></span>
+              <input id="search" type="search" placeholder="Search FRN, make, model or manufacturer" autocomplete="off" spellcheck="false">
+            </div>
+            <div class="search-summary" id="search-summary"></div>
+            <div class="results" id="search-results" role="list"></div>
+          </div>
+        </section>
+
+        <!-- FRN detail (one per open FRN tab) -->
+        <section class="view" id="view-frn" hidden></section>
+      </div>
+
+      <div class="sash" id="sash" role="separator" aria-orientation="horizontal" title="Drag to resize"></div>
+
+      <section class="panel" id="panel">
+        <div class="panel-head">
+          <div class="panel-tabs"><span class="panel-tab active">Output</span></div>
+          <div class="panel-actions">
+            <span class="panel-channel mono" id="log-channel">FRT Ingest</span>
+            <button class="icon-btn active" id="btn-follow" title="Follow output (scroll lock off)" aria-pressed="true"><span data-icon="follow"></span></button>
+            <a class="icon-btn" id="log-download" title="Open full log" target="_blank" rel="noopener" hidden><span data-icon="linkExternal"></span></a>
+          </div>
+        </div>
+        <div class="log" id="log" tabindex="0"><div class="log-empty">No output yet.</div></div>
+      </section>
+    </main>
+  </div>
+
+  <footer class="statusbar" id="statusbar">
+    <div class="sb-group">
+      <span class="sb-item sb-remote"><span data-icon="database"></span>FRT</span>
+      <span class="sb-item" id="sb-conn"></span>
+      <span class="sb-item" id="sb-edition"></span>
+    </div>
+    <div class="sb-group">
+      <span class="sb-item" id="sb-job"></span>
+      <span class="sb-item sb-optional" id="sb-server"></span>
+    </div>
+  </footer>
+
+  <div class="notifications" id="notifications" aria-live="polite"></div>
+
+  <dialog class="modal" id="modal">
+    <div class="modal-body">
+      <span class="modal-icon" id="modal-icon"></span>
+      <div>
+        <p class="modal-title" id="modal-title"></p>
+        <p class="modal-detail" id="modal-detail"></p>
+      </div>
+    </div>
+    <div class="modal-buttons">
+      <button class="btn btn-primary" id="modal-ok">OK</button>
+      <button class="btn btn-secondary" id="modal-cancel">Cancel</button>
+    </div>
+  </dialog>
+
+  <script src="app.js"></script>
+</body>
+</html>

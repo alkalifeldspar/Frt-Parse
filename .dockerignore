@@ -1,0 +1,11 @@
+# Build context is the repository root (see docker/docker-compose.yml).
+# Whitelist only what the image needs; the FRT PDFs alone are over 1 GB.
+*
+!download_frt.py
+!parse_frt.py
+!split_frn.py
+!createDb.py
+!importIntoDb.py
+!docker/
+docker/.env
+docker/app/node_modules
